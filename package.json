@@ -1,0 +1,33 @@
+{
+  "name": "antigravity-quota-indicator",
+  "version": "1.0.0",
+  "description": "⚡ Real-time AI model quota monitor and status indicator widget for Google Antigravity Desktop Client (Google 反重力桌面客户端实时模型配额与用量监控插件)",
+  "main": "src/quota-widget.js",
+  "bin": {
+    "antigravity-quota": "./bin/cli.js"
+  },
+  "scripts": {
+    "install-patch": "node bin/cli.js install",
+    "hot-reload": "node bin/cli.js hot-reload",
+    "restore": "node bin/cli.js restore"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sliccic/antigravity-quota-indicator.git"
+  },
+  "keywords": [
+    "antigravity",
+    "google-antigravity",
+    "gemini",
+    "claude",
+    "quota-indicator",
+    "model-quota",
+    "usage-monitor",
+    "electron-plugin"
+  ],
+  "author": "Sliccic",
+  "license": "MIT",
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
