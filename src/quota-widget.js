@@ -32,6 +32,7 @@
   // 采用与图二完全一致的 Antigravity 原生字体栈（完美适配 Windows Consolas 与现代无衬线体）
   const FONT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
   const FONT_MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
+  const FONT_NUM = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
 
   // 注入微型呼吸动效样式
   if (typeof document !== 'undefined' && !document.getElementById('agy-pulse-style')) {
@@ -124,8 +125,10 @@
   }
 
   function parseQuota(data) {
-    if (!data?.response?.groups) return null;
-    const groups = data.response.groups;
+    if (!data) return null;
+    const groups = data?.response?.groups || data?.groups || (Array.isArray(data) ? data : null);
+    if (!groups || !Array.isArray(groups)) return null;
+
     const gemini = groups.find(g => g.displayName?.includes('Gemini')) || groups[0];
     const g5h = gemini?.buckets?.find(b => b.window === '5h');
     const gW = gemini?.buckets?.find(b => b.window === 'weekly');
@@ -134,20 +137,26 @@
     const t5h = tp?.buckets?.find(b => b.window === '5h');
     const tW = tp?.buckets?.find(b => b.window === 'weekly');
 
+    const getFrac = (b) => {
+      if (!b) return 100;
+      const f = b.remainingFraction ?? b.fraction;
+      return typeof f === 'number' ? Math.round(f * 100) : 100;
+    };
+
     return {
       gemini: {
         name: gemini?.displayName || 'Gemini 模型',
         desc: gemini?.description || 'Pro & Flash 共享',
-        p5h: g5h ? Math.round(g5h.remainingFraction * 100) : 100,
-        pW: gW ? Math.round(gW.remainingFraction * 100) : 100,
+        p5h: getFrac(g5h),
+        pW: getFrac(gW),
         reset5h: g5h?.resetTime,
         resetW: gW?.resetTime
       },
       thirdParty: tp ? {
         name: tp.displayName || 'Claude 与 GPT 模型',
         desc: tp.description || '第三方模型',
-        p5h: t5h ? Math.round(t5h.remainingFraction * 100) : 100,
-        pW: tW ? Math.round(tW.remainingFraction * 100) : 100,
+        p5h: getFrac(t5h),
+        pW: getFrac(tW),
         reset5h: t5h?.resetTime,
         resetW: tW?.resetTime
       } : null
@@ -1185,9 +1194,13 @@
   }
 
   async function renderAll() {
-    const parsedQuota = parseQuota(quotaData);
-    updateQuotaTopPill(parsedQuota);
-    renderQuotaPopoverContent(parsedQuota);
+    if (!quotaData) {
+      refreshQuotaOnly(false);
+    } else {
+      const parsedQuota = parseQuota(quotaData);
+      updateQuotaTopPill(parsedQuota);
+      renderQuotaPopoverContent(parsedQuota);
+    }
 
     if (!activeTaskState && currentTaskData) {
       activeTaskState = resolveActiveTaskFast(currentTaskData);
@@ -1205,7 +1218,7 @@
     pollIntervalTimer = setInterval(() => {
       refreshTaskOnly(false);
       const now = Date.now();
-      if (config.refreshInterval > 0 && now - lastQuotaFetchTime >= config.refreshInterval * 1000) {
+      if (!quotaData || (config.refreshInterval > 0 && now - lastQuotaFetchTime >= config.refreshInterval * 1000)) {
         refreshQuotaOnly(false);
       }
     }, 1000);
