@@ -29,20 +29,19 @@
   }
   window.__AGY_MODEL_QUOTA_WIDGET_INITIALIZED__ = true;
 
-  // 采用与图二完全一致的 Antigravity 原生字体栈（完美适配 Windows Consolas 与现代无衬线体）
+  // 采用与图二完全一致的 Antigravity 原生字体栈（完美适配 Windows Consolas 与现代等宽无衬线体，去除内部双引号避免属性破坏）
   const FONT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
-  const FONT_MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
-  const FONT_NUM = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
+  const FONT_MONO = 'Consolas, ui-monospace, SFMono-Regular, Menlo, monospace';
+  const FONT_NUM = 'Consolas, ui-monospace, SFMono-Regular, Menlo, monospace';
 
-  // 注入微型呼吸动效样式
+  // 注入微型柔和呼吸动效样式
   if (typeof document !== 'undefined' && !document.getElementById('agy-pulse-style')) {
     const s = document.createElement('style');
     s.id = 'agy-pulse-style';
     s.textContent = `
       @keyframes agy-pulse-dot {
-        0% { transform: scale(0.9); opacity: 0.8; }
-        50% { transform: scale(1.35); opacity: 1; }
-        100% { transform: scale(0.9); opacity: 0.8; }
+        0%, 100% { opacity: 0.85; transform: scale(1); }
+        50% { opacity: 1; transform: scale(1.12); box-shadow: 0 0 7px rgba(34,197,94,0.9); }
       }
     `;
     document.head.appendChild(s);
@@ -939,6 +938,77 @@
     const timeFormatted = formatTaskDuration(task.elapsedSec);
     const startTimeText = task.userStartTime ? new Date(task.userStartTime).toLocaleTimeString() : '--';
 
+    const timerEl = popover.querySelector('#agy-task-popover-timer');
+    if (timerEl) {
+      // 增量精准更新，绝不重复销毁 DOM，彻底消除卡顿与闪烁
+      timerEl.textContent = timeFormatted;
+      timerEl.style.color = isRunning ? '#22c55e' : '#e4e4e7';
+
+      const heroCard = popover.querySelector('#agy-task-hero-card');
+      if (heroCard) {
+        heroCard.style.borderColor = isRunning ? 'rgba(34,197,94,0.35)' : '#27272a';
+        heroCard.style.boxShadow = isRunning ? '0 0 16px rgba(34,197,94,0.08)' : 'none';
+      }
+
+      const timerSubtitle = popover.querySelector('#agy-task-timer-subtitle');
+      if (timerSubtitle) timerSubtitle.textContent = isRunning ? '当前任务已执行' : '上一轮任务总耗时';
+
+      const startTimeEl = popover.querySelector('#agy-task-start-time');
+      if (startTimeEl) startTimeEl.textContent = `开始: ${startTimeText}`;
+
+      const titleEl = popover.querySelector('#agy-task-title-text');
+      if (titleEl) {
+        titleEl.textContent = task.title;
+        titleEl.title = task.title;
+      }
+
+      const statusBadge = popover.querySelector('#agy-task-status-badge');
+      if (statusBadge) {
+        statusBadge.style.background = isRunning ? 'rgba(34,197,94,0.15)' : 'rgba(148,163,184,0.15)';
+        statusBadge.style.color = isRunning ? '#22c55e' : '#a1a1aa';
+        const badgeDot = statusBadge.querySelector('.agy-badge-dot');
+        if (badgeDot) {
+          badgeDot.style.animation = isRunning ? 'agy-pulse-dot 1.5s infinite' : 'none';
+        }
+        const badgeText = statusBadge.querySelector('.agy-badge-text');
+        if (badgeText) badgeText.textContent = isRunning ? '执行中' : '已就绪';
+      }
+
+      const stepStatusEl = popover.querySelector('#agy-task-step-status');
+      if (stepStatusEl) {
+        stepStatusEl.textContent = task.activeTool ? '⚡ ' + task.activeTool : (isRunning ? '🧠 Agent Thinking / Planning' : '✓ 任务已完成');
+      }
+
+      const stepDescEl = popover.querySelector('#agy-task-step-desc');
+      if (stepDescEl) {
+        stepDescEl.textContent = task.activeTool ? '正在调用系统工具执行操作...' : (isRunning ? '模型正在推理与规划响应...' : '等待用户新的指令...');
+      }
+
+      const stepBadge = popover.querySelector('#agy-task-step-badge');
+      if (stepBadge) stepBadge.textContent = isRunning ? '进行中' : '就绪';
+
+      const stepsCountEl = popover.querySelector('#agy-task-metric-steps');
+      if (stepsCountEl) stepsCountEl.textContent = task.stepCount;
+
+      const outTokensEl = popover.querySelector('#agy-task-metric-out');
+      if (outTokensEl) {
+        outTokensEl.textContent = formatTokens(task.outTokens);
+        outTokensEl.title = Number(task.outTokens).toLocaleString();
+      }
+
+      const cacheTokensEl = popover.querySelector('#agy-task-metric-cache');
+      if (cacheTokensEl) {
+        cacheTokensEl.textContent = formatTokens(task.cacheTokens);
+        cacheTokensEl.title = Number(task.cacheTokens).toLocaleString();
+      }
+
+      const inTokensEl = popover.querySelector('#agy-task-metric-in');
+      if (inTokensEl) inTokensEl.textContent = formatTokens(task.inTokens);
+
+      return;
+    }
+
+    // 初次创建完整模板结构
     popover.innerHTML = `
       <!-- Header -->
       <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:10px;border-bottom:1px solid #27272a;font-family:${FONT_SANS};">
@@ -947,9 +1017,9 @@
           <span>任务计时器</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:500;${isRunning ? 'background:rgba(34,197,94,0.15);color:#22c55e;' : 'background:rgba(148,163,184,0.15);color:#a1a1aa;'}">
-            <span style="width:6px;height:6px;border-radius:50%;background:currentColor;${isRunning ? 'animation:agy-pulse-dot 1.5s infinite;' : ''}"></span>
-            ${isRunning ? '执行中' : '已就绪'}
+          <span id="agy-task-status-badge" style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:12px;font-size:11px;font-weight:500;${isRunning ? 'background:rgba(34,197,94,0.15);color:#22c55e;' : 'background:rgba(148,163,184,0.15);color:#a1a1aa;'}">
+            <span class="agy-badge-dot" style="width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;${isRunning ? 'animation:agy-pulse-dot 1.5s infinite;' : ''}"></span>
+            <span class="agy-badge-text">${isRunning ? '执行中' : '已就绪'}</span>
           </span>
           <button id="agy-task-refresh-btn" title="立即刷新状态" style="-webkit-app-region:no-drag;cursor:pointer;background:transparent;border:1px solid #27272a;color:#a1a1aa;border-radius:6px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:12px;transition:all 0.15s;">
             🔄
@@ -958,19 +1028,19 @@
       </div>
 
       <!-- Hero Timer Card -->
-      <div style="background:#1a1b20;border:1px solid ${isRunning ? 'rgba(34,197,94,0.35)' : '#27272a'};border-radius:8px;padding:12px;text-align:center;margin-top:10px;${isRunning ? 'box-shadow:0 0 16px rgba(34,197,94,0.08);' : ''}">
-        <div style="font-size:11px;font-weight:500;color:#a1a1aa;letter-spacing:0.5px;margin-bottom:2px;font-family:${FONT_SANS};">
+      <div id="agy-task-hero-card" style="background:#1a1b20;border:1px solid ${isRunning ? 'rgba(34,197,94,0.35)' : '#27272a'};border-radius:8px;padding:12px;text-align:center;margin-top:10px;${isRunning ? 'box-shadow:0 0 16px rgba(34,197,94,0.08);' : ''}">
+        <div id="agy-task-timer-subtitle" style="font-size:11px;font-weight:500;color:#a1a1aa;letter-spacing:0.5px;margin-bottom:2px;font-family:${FONT_SANS};">
           ${isRunning ? '当前任务已执行' : '上一轮任务总耗时'}
         </div>
         <div id="agy-task-popover-timer" style="font-family:${FONT_MONO};font-size:38px;font-weight:700;letter-spacing:-1px;color:${isRunning ? '#22c55e' : '#e4e4e7'};line-height:1.15;margin:4px 0;">
           ${timeFormatted}
         </div>
-        <div style="font-size:10px;color:#a1a1aa;margin-top:2px;font-family:${FONT_MONO};">
+        <div id="agy-task-start-time" style="font-size:10px;color:#a1a1aa;margin-top:2px;font-family:${FONT_MONO};">
           开始: ${startTimeText}
         </div>
         <div style="margin-top:10px;background:#27272a;border-radius:6px;padding:6px 8px;text-align:left;display:flex;align-items:flex-start;gap:6px;font-size:11px;">
           <span style="background:rgba(59,130,246,0.2);color:#60a5fa;font-size:9px;padding:1px 4px;border-radius:3px;font-weight:600;flex-shrink:0;">指令</span>
-          <span style="color:#e4e4e7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.35;font-family:${FONT_SANS};" title="${task.title}">
+          <span id="agy-task-title-text" style="color:#e4e4e7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.35;font-family:${FONT_SANS};" title="${task.title}">
             ${task.title}
           </span>
         </div>
@@ -983,39 +1053,36 @@
             <span style="width:7px;height:7px;border-radius:50%;background:${isRunning ? '#22c55e' : '#94a3b8'};display:inline-block;${isRunning ? 'animation:agy-pulse-dot 1.2s infinite;' : ''}"></span>
             当前步骤状态
           </div>
-          <span style="font-family:${FONT_MONO};font-size:11px;font-weight:600;color:#3b82f6;background:rgba(59,130,246,0.1);padding:1px 6px;border-radius:4px;">
+          <span id="agy-task-step-badge" style="font-family:${FONT_MONO};font-size:11px;font-weight:600;color:#3b82f6;background:rgba(59,130,246,0.1);padding:1px 6px;border-radius:4px;">
             ${isRunning ? '进行中' : '就绪'}
           </span>
         </div>
-        <div style="font-family:${FONT_MONO};font-size:12px;font-weight:600;color:#38bdf8;display:flex;align-items:center;gap:5px;">
+        <div id="agy-task-step-status" style="font-family:${FONT_MONO};font-size:12px;font-weight:600;color:#38bdf8;display:flex;align-items:center;gap:5px;">
           <span>${task.activeTool ? '⚡ ' + task.activeTool : (isRunning ? '🧠 Agent Thinking / Planning' : '✓ 任务已完成')}</span>
         </div>
-        <div style="font-size:11px;color:#a1a1aa;margin-top:2px;font-family:${FONT_SANS};">
+        <div id="agy-task-step-desc" style="font-size:11px;color:#a1a1aa;margin-top:2px;font-family:${FONT_SANS};">
           ${task.activeTool ? '正在调用系统工具执行操作...' : (isRunning ? '模型正在推理与规划响应...' : '等待用户新的指令...')}
         </div>
       </div>
 
       <!-- Metrics Grid (3 Columns like Image 2) -->
       <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;margin-top:8px;">
-        <!-- 步骤数 -->
         <div style="background:#1a1b20;border:1px solid #27272a;border-radius:7px;padding:8px 6px;text-align:center;">
-          <div style="font-family:${FONT_MONO};font-size:15px;font-weight:700;color:#e4e4e7;">
+          <div id="agy-task-metric-steps" style="font-family:${FONT_MONO};font-size:15px;font-weight:700;color:#e4e4e7;">
             ${task.stepCount}
           </div>
           <div style="font-size:11px;color:#a1a1aa;margin-top:2px;font-family:${FONT_SANS};">步骤数</div>
         </div>
 
-        <!-- 输出 Tokens -->
         <div style="background:#1a1b20;border:1px solid #27272a;border-radius:7px;padding:8px 6px;text-align:center;">
-          <div style="font-family:${FONT_MONO};font-size:15px;font-weight:700;color:#e4e4e7;" title="${Number(task.outTokens).toLocaleString()}">
+          <div id="agy-task-metric-out" style="font-family:${FONT_MONO};font-size:15px;font-weight:700;color:#e4e4e7;" title="${Number(task.outTokens).toLocaleString()}">
             ${formatTokens(task.outTokens)}
           </div>
           <div style="font-size:11px;color:#a1a1aa;margin-top:2px;font-family:${FONT_SANS};">输出 Tokens</div>
         </div>
 
-        <!-- 缓存命中 (Cache Hit) -->
         <div style="background:#1a1b20;border:1px solid #27272a;border-radius:7px;padding:8px 6px;text-align:center;">
-          <div style="font-family:${FONT_MONO};font-size:15px;font-weight:700;color:#22c55e;" title="${Number(task.cacheTokens).toLocaleString()}">
+          <div id="agy-task-metric-cache" style="font-family:${FONT_MONO};font-size:15px;font-weight:700;color:#22c55e;" title="${Number(task.cacheTokens).toLocaleString()}">
             ${formatTokens(task.cacheTokens)}
           </div>
           <div style="font-size:11px;color:#a1a1aa;margin-top:2px;font-family:${FONT_SANS};">缓存命中</div>
@@ -1024,7 +1091,7 @@
 
       <!-- Footer Sub-bar -->
       <div style="font-size:10px;color:#a1a1aa;display:flex;justify-content:space-between;margin-top:8px;padding-top:6px;border-top:1px solid #27272a;font-family:${FONT_SANS};">
-        <span>输入: <strong style="font-family:${FONT_MONO};color:#e4e4e7;">${formatTokens(task.inTokens)}</strong> Tokens</span>
+        <span>输入: <strong id="agy-task-metric-in" style="font-family:${FONT_MONO};color:#e4e4e7;">${formatTokens(task.inTokens)}</strong> Tokens</span>
         <span style="color:#22c55e;">● 当前窗口毫秒级同步</span>
       </div>
     `;
@@ -1069,6 +1136,12 @@
         'z-index: 50'
       ].join(';');
 
+      pill.innerHTML = `
+        <span id="agy-task-pill-dot" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#94a3b8;flex-shrink:0;"></span>
+        <span id="agy-task-pill-text" style="font-family:${FONT_MONO};font-size:11px;opacity:0.85;color:#e4e4e7;">就绪</span>
+        <span id="agy-task-pill-badge" style="display:none;font-size:10px;color:#60a5fa;background:rgba(59,130,246,0.18);padding:1px 5px;border-radius:3px;max-width:85px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:${FONT_MONO};"></span>
+      `;
+
       pill.addEventListener('mouseenter', () => {
         const mode = config.taskTriggerMode || 'hover';
         if (mode === 'hover') openTaskPopover(pill, false);
@@ -1098,38 +1171,68 @@
       }
     }
 
+    const dotEl = pill.querySelector('#agy-task-pill-dot');
+    const textEl = pill.querySelector('#agy-task-pill-text');
+    const badgeEl = pill.querySelector('#agy-task-pill-badge');
+    if (!dotEl || !textEl) return;
+
     if (!task) {
-      pill.style.fontFamily = FONT_SANS;
       pill.style.background = 'var(--card, rgba(255,255,255,0.06))';
       pill.style.borderColor = 'var(--border, rgba(255,255,255,0.12))';
-      pill.innerHTML = `
-        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#94a3b8;"></span>
-        <span style="opacity:0.8;color:#e4e4e7;font-family:${FONT_MONO};font-size:11px;">就绪</span>
-      `;
+      dotEl.style.background = '#94a3b8';
+      dotEl.style.boxShadow = 'none';
+      dotEl.style.animation = 'none';
+      textEl.style.color = '#e4e4e7';
+      textEl.style.fontSize = '11px';
+      textEl.style.fontWeight = 'normal';
+      textEl.textContent = '就绪';
+      if (badgeEl) badgeEl.style.display = 'none';
+      pill.title = '当前会话任务就绪\n单击展开详情与 Token 统计';
       return;
     }
 
     const isRunning = task.isRunning;
     const timeFormatted = formatTaskDuration(task.elapsedSec);
 
-    pill.style.fontFamily = FONT_SANS;
     if (isRunning) {
       pill.style.background = 'rgba(34, 197, 94, 0.12)';
       pill.style.borderColor = 'rgba(34, 197, 94, 0.35)';
-      const toolBadge = task.activeTool ? `<span style="font-size:10px;color:#60a5fa;background:rgba(59,130,246,0.18);padding:1px 5px;border-radius:3px;max-width:85px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:${FONT_MONO};">⚡${task.activeTool}</span>` : '';
-      pill.innerHTML = `
-        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px rgba(34,197,94,0.8);animation:agy-pulse-dot 1.5s infinite;"></span>
-        <span style="font-weight:600;color:#22c55e;font-family:${FONT_MONO};font-size:12px;letter-spacing:-0.2px;">执行中 ${timeFormatted}</span>
-        ${toolBadge}
-      `;
+
+      dotEl.style.background = '#22c55e';
+      dotEl.style.boxShadow = '0 0 6px rgba(34,197,94,0.8)';
+      if (!dotEl.style.animation || dotEl.style.animation === 'none') {
+        dotEl.style.animation = 'agy-pulse-dot 1.5s infinite';
+      }
+
+      textEl.style.color = '#22c55e';
+      textEl.style.fontSize = '12px';
+      textEl.style.fontWeight = '600';
+      textEl.textContent = `执行中 ${timeFormatted}`;
+
+      if (badgeEl) {
+        if (task.activeTool) {
+          badgeEl.textContent = `⚡${task.activeTool}`;
+          badgeEl.style.display = 'inline-block';
+        } else {
+          badgeEl.style.display = 'none';
+        }
+      }
+
       pill.title = `当前会话任务执行中: 已耗时 ${timeFormatted}\n单击展开详情与 Token 统计`;
     } else {
       pill.style.background = 'var(--card, rgba(255,255,255,0.06))';
       pill.style.borderColor = 'var(--border, rgba(255,255,255,0.12))';
-      pill.innerHTML = `
-        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#94a3b8;"></span>
-        <span style="opacity:0.85;color:#e4e4e7;font-family:${FONT_MONO};font-size:11px;">${task.elapsedSec ? `已完成 ${timeFormatted}` : '就绪'}</span>
-      `;
+
+      dotEl.style.background = '#94a3b8';
+      dotEl.style.boxShadow = 'none';
+      dotEl.style.animation = 'none';
+
+      textEl.style.color = '#e4e4e7';
+      textEl.style.fontSize = '11px';
+      textEl.style.fontWeight = 'normal';
+      textEl.textContent = task.elapsedSec ? `已完成 ${timeFormatted}` : '就绪';
+
+      if (badgeEl) badgeEl.style.display = 'none';
       pill.title = `当前会话任务就绪 (上次耗时: ${timeFormatted})\n单击展开详情与 Token 统计`;
     }
   }
