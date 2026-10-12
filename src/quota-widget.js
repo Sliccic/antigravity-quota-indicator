@@ -69,7 +69,18 @@
     }
 
     const csrfToken = window.__APP_CONFIG__?.csrfToken;
-    if (!csrfToken) return null;
+    if (!csrfToken) {
+      // 客户端初次冷启动时若 __APP_CONFIG__ 尚未挂载，800ms 后自动重试
+      if (!window.__AGY_CSRF_RETRY_TIMER__) {
+        window.__AGY_CSRF_RETRY_TIMER__ = setTimeout(() => {
+          window.__AGY_CSRF_RETRY_TIMER__ = null;
+          if (window.__APP_CONFIG__?.csrfToken && !quotaData) {
+            refreshAll(true);
+          }
+        }, 800);
+      }
+      return null;
+    }
 
     try {
       isFetching = true;
@@ -200,7 +211,6 @@
         if (hidePopoverTimer) clearTimeout(hidePopoverTimer);
       });
       popover.addEventListener('mouseleave', () => {
-        // 如果处于设置视图或已点击固定，不自动隐藏
         if (currentCardView === 'settings' || isPopoverPinned) return;
         if (config.triggerMode === 'hover') {
           scheduleHidePopover();
@@ -672,11 +682,36 @@
     }, 150);
   });
 
-  observer.observe(document.body, { childList: true, subtree: true });
+  // 安全启动：兼容 document-start、loading 与已完成阶段
+  function startObserverAndMount() {
+    const root = document.body || document.documentElement;
+    if (root) {
+      try {
+        observer.observe(root, { childList: true, subtree: true });
+      } catch (_) {}
+    }
+    refreshAll();
+    setupPollingTimer();
 
-  // 立即启动
-  refreshAll();
-  setupPollingTimer();
+    // 兜底挂载机制：初次启动前 10 秒每 1 秒确认一次挂载情况
+    let retryCount = 0;
+    const retryTimer = setInterval(() => {
+      retryCount++;
+      const pill = document.getElementById('agy-model-quota-topbar');
+      if (!pill) {
+        renderAll();
+      }
+      if (pill || retryCount >= 10) {
+        clearInterval(retryTimer);
+      }
+    }, 1000);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startObserverAndMount);
+  } else {
+    startObserverAndMount();
+  }
 
   const onFocus = () => refreshAll(false);
   window.addEventListener('focus', onFocus);

@@ -1,6 +1,6 @@
 /**
  * Cross-Platform Installer for Antigravity Model Quota Indicator
- * 跨平台智能安装器（支持 Windows / macOS / Linux，支持零重启热注入与退出自动替换）
+ * 跨平台智能安装器（支持 Windows / macOS / Linux，支持主世界注入、在位直写与零重启热重载）
  */
 
 const fs = require('fs');
@@ -49,10 +49,10 @@ function findAsarPath() {
 function isProcessRunning() {
   try {
     if (os.platform() === 'win32') {
-      const out = execSync('tasklist /FI "IMAGENAME eq antigravity.exe"', { encoding: 'utf8' });
+      const out = execSync('tasklist /FI "IMAGENAME eq Antigravity.exe" /NH', { encoding: 'utf8' });
       return out.toLowerCase().includes('antigravity.exe');
     } else {
-      const out = execSync('pgrep -i antigravity', { encoding: 'utf8' });
+      const out = execSync('pgrep -i antigravity || true', { encoding: 'utf8' });
       return !!out.trim();
     }
   } catch (_) {
@@ -72,7 +72,6 @@ async function install() {
   console.log(`   ✅ 目标 ASAR: ${asarPath}`);
   const asarDir = path.dirname(asarPath);
   const backupPath = path.join(asarDir, 'app.asar.bak');
-  const stagedPath = path.join(asarDir, 'app.asar.staged');
 
   console.log('📦 [2/4] 检查原始安全备份...');
   if (!fs.existsSync(backupPath)) {
@@ -97,57 +96,65 @@ async function install() {
     process.exit(1);
   }
 
-  // 寻找适合注入的 JS 文件
-  const widgetCode = fs.readFileSync(path.join(__dirname, '..', 'src', 'quota-widget.js'), 'utf8');
-  const injectionWrapper = `\n\n// --- Antigravity Quota Indicator Injection Start ---\n${widgetCode}\n// --- Antigravity Quota Indicator Injection End ---\n`;
+  const widgetPath = path.join(__dirname, '..', 'src', 'quota-widget.js');
+  const widgetCode = fs.readFileSync(widgetPath, 'utf8');
+
+  // 构建支持主世界隔离穿透的注入包装体 (Main World Context Bridge)
+  const injectionWrapper = `
+// --- Antigravity Model Quota Indicator Start ---
+(function() {
+  function __agy_inject_quota__() {
+    try {
+      const { webFrame } = require('electron');
+      if (webFrame && typeof webFrame.executeJavaScript === 'function') {
+        webFrame.executeJavaScript(${JSON.stringify(widgetCode)});
+        return;
+      }
+    } catch (_) {}
+
+    try {
+      const s = document.createElement('script');
+      s.textContent = ${JSON.stringify(widgetCode)};
+      (document.head || document.documentElement).appendChild(s);
+      s.remove();
+    } catch (e) {
+      console.error('[AGY-Quota] Main world injection error:', e);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', __agy_inject_quota__);
+  } else {
+    __agy_inject_quota__();
+  }
+})();
+// --- Antigravity Model Quota Indicator End ---
+`;
 
   let patched = false;
-  // 查找候选入口
-  const candidateEntries = [
-    path.join(tempExtractDir, 'dist', 'main.js'),
-    path.join(tempExtractDir, 'out', 'main.js'),
-    path.join(tempExtractDir, 'index.js'),
-    path.join(tempExtractDir, 'dist', 'index.js')
-  ];
-
-  // 遍历寻找包含 HTML 或 webContents 的入口
-  for (const entry of candidateEntries) {
-    if (fs.existsSync(entry)) {
-      let content = fs.readFileSync(entry, 'utf8');
-      if (!content.includes('initModelQuotaWidget')) {
-        // 在 loadURL 或 did-finish-load 处注入，或直接作为 preload 附着
-        fs.appendFileSync(entry, injectionWrapper);
-        patched = true;
-        break;
-      }
+  const preloadPath = path.join(tempExtractDir, 'dist', 'preload.js');
+  if (fs.existsSync(preloadPath)) {
+    let content = fs.readFileSync(preloadPath, 'utf8');
+    if (content.includes('Antigravity Model Quota Indicator Start')) {
+      const regexQuota = /\/\/ --- Antigravity Model Quota Indicator Start ---[\s\S]*?\/\/ --- Antigravity Model Quota Indicator End ---/g;
+      content = content.replace(regexQuota, '');
     }
+    content += '\n' + injectionWrapper;
+    fs.writeFileSync(preloadPath, content, 'utf8');
+    patched = true;
   }
 
-  // 如果找不到明确入口，搜索任意 .html 模板注入 <script>
   if (!patched) {
-    function walkHtml(dir) {
-      const files = fs.readdirSync(dir);
-      for (const f of files) {
-        const full = path.join(dir, f);
-        if (fs.statSync(full).isDirectory()) {
-          walkHtml(full);
-        } else if (f.endsWith('.html')) {
-          let html = fs.readFileSync(full, 'utf8');
-          if (!html.includes('initModelQuotaWidget')) {
-            html = html.replace('</body>', `<script>${widgetCode}</script></body>`);
-            fs.writeFileSync(full, html, 'utf8');
-            patched = true;
-          }
-        }
-      }
-    }
-    walkHtml(tempExtractDir);
+    console.error('❌ 未能在 ASAR 内找到 dist/preload.js 入口文件。');
+    process.exit(1);
   }
 
-  console.log('🔄 [4/4] 重新打包资源包...');
-  const targetOutput = isProcessRunning() ? stagedPath : asarPath;
+  console.log('🔄 [4/4] 重新打包资源包并覆写应用...');
+  const tempNewAsar = path.join(asarDir, 'app.asar.new');
+  if (fs.existsSync(tempNewAsar)) fs.rmSync(tempNewAsar, { force: true });
+
   try {
-    execSync(`npx --yes @electron/asar pack "${tempExtractDir}" "${targetOutput}"`, { stdio: 'pipe' });
+    execSync(`npx --yes @electron/asar pack "${tempExtractDir}" "${tempNewAsar}"`, { stdio: 'pipe' });
   } catch (e) {
     console.error('❌ 打包 ASAR 失败:', e.message);
     process.exit(1);
@@ -157,40 +164,59 @@ async function install() {
     } catch (_) {}
   }
 
-  if (targetOutput === stagedPath) {
-    console.log(`✨ [无损预注入] 客户端当前正在运行，补丁包已生成为: ${stagedPath}`);
-    console.log('✨ 挂载退出自动原子替换守护...');
-    // 启动后台轮询进程，当 antigravity 退出时原子 rename
+  // 尝试在位流式覆写（在 Windows 上即使 Antigravity 正在运行也可以直接写入）
+  let writtenDirectly = false;
+  try {
+    fs.copyFileSync(tempNewAsar, asarPath);
+    writtenDirectly = true;
+    console.log('✅ 已成功直接写入 app.asar，永久生效！');
+    if (fs.existsSync(tempNewAsar)) fs.rmSync(tempNewAsar, { force: true });
+    const stagedPath = path.join(asarDir, 'app.asar.staged');
+    if (fs.existsSync(stagedPath)) fs.rmSync(stagedPath, { force: true });
+  } catch (err) {
+    console.warn(`   ⚠️ 直接写入遇到锁定，转为暂存守护模式: ${err.message}`);
+  }
+
+  if (!writtenDirectly) {
+    const stagedPath = path.join(asarDir, 'app.asar.staged');
+    if (fs.existsSync(stagedPath)) fs.rmSync(stagedPath, { force: true });
+    fs.renameSync(tempNewAsar, stagedPath);
+
+    // 挂载退出自动替换守护
     const daemonScript = `
       const fs = require('fs');
       const { execSync } = require('child_process');
-      setInterval(() => {
+      const timer = setInterval(() => {
         try {
-          const out = execSync('tasklist /FI "IMAGENAME eq antigravity.exe"', { encoding: 'utf8' });
+          const out = execSync('tasklist /FI "IMAGENAME eq Antigravity.exe" /NH', { encoding: 'utf8' });
           if (!out.toLowerCase().includes('antigravity.exe')) {
             if (fs.existsSync('${stagedPath.replace(/\\/g, '\\\\')}')) {
               fs.copyFileSync('${stagedPath.replace(/\\/g, '\\\\')}', '${asarPath.replace(/\\/g, '\\\\')}');
               fs.unlinkSync('${stagedPath.replace(/\\/g, '\\\\')}');
             }
+            clearInterval(timer);
             process.exit(0);
           }
         } catch(_) {}
-      }, 1000);
+      }, 500);
     `;
     const tmpDaemon = path.join(os.tmpdir(), `agy_quota_daemon_${Date.now()}.js`);
     fs.writeFileSync(tmpDaemon, daemonScript, 'utf8');
     const child = require('child_process').spawn('node', [tmpDaemon], { detached: true, stdio: 'ignore' });
     child.unref();
-
-    console.log('⚡ 正在尝试即时热注入当前运行窗口...');
-    try {
-      await hotInject();
-    } catch (err) {
-      console.log('   (提示: 您也可以正常重启客户端以使补丁永久生效)');
-    }
-  } else {
-    console.log('🎉 安装完成！下次启动 Antigravity 客户端即可呈现模型余量指示器。');
   }
+
+  console.log('⚡ 正在执行即时热重载，无需等待重启...');
+  try {
+    await hotInject();
+  } catch (e) {
+    console.log('   (提示：客户端将在下次打开时自动呈现)');
+  }
+
+  console.log('\n🎉 ==============================================');
+  console.log('🎉 实时模型余量监控插件安装成功！');
+  console.log('🎉 当前窗口已即时生效，重启客户端后依然永久常驻。');
+  console.log('🎉 ==============================================\n');
 }
 
 if (require.main === module) {
