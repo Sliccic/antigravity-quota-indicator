@@ -24,9 +24,23 @@
 
   if (window.__AGY_MODEL_QUOTA_WIDGET_INITIALIZED__) {
     if (window.__AGY_QUOTA_CLEANUP__) {
-      window.__AGY_QUOTA_CLEANUP__();
+      try { window.__AGY_QUOTA_CLEANUP__(); } catch (_) {}
     }
   }
+
+  // 唯一实例 ID 守卫：使旧实例在下一次循环时自动静默退出，彻底根除多版本/旧闭包争抢 DOM
+  const WIDGET_INSTANCE_ID = 'agy_inst_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  window.__AGY_ACTIVE_INSTANCE_ID__ = WIDGET_INSTANCE_ID;
+
+  if (window.__AGY_TASK_TICK_TIMER__) {
+    clearInterval(window.__AGY_TASK_TICK_TIMER__);
+    window.__AGY_TASK_TICK_TIMER__ = null;
+  }
+  if (window.__AGY_TASK_POLL_TIMER__) {
+    clearInterval(window.__AGY_TASK_POLL_TIMER__);
+    window.__AGY_TASK_POLL_TIMER__ = null;
+  }
+
   window.__AGY_MODEL_QUOTA_WIDGET_INITIALIZED__ = true;
 
   // 采用与图二完全一致的 Antigravity 原生字体栈（完美适配 Windows Consolas 与现代等宽无衬线体，去除内部双引号避免属性破坏）
@@ -662,54 +676,48 @@
     if (!trajectoriesList || trajectoriesList.length === 0) return null;
     if (trajectoriesList.length === 1) return trajectoriesList[0].id;
 
-    // 1. 尝试匹配 document.title（Antigravity 窗口标题通常包含当前会话的主题/标题）
-    const docTitle = document.title || '';
-    for (const t of trajectoriesList) {
-      const title = t.annotations?.title || t.summary || '';
-      if (title && docTitle.includes(title)) {
-        return t.id;
-      }
-    }
-
-    // 2. 尝试从 DOM 属性或 iframe src 中检测当前会话的 UUID
-    const uuidRegex = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-    const candidates = document.querySelectorAll('[data-cascade-id], [data-conversation-id], iframe[src*="conversationId"]');
-    for (const el of candidates) {
-      const id = el.getAttribute('data-cascade-id') || el.getAttribute('data-conversation-id');
-      if (id && uuidRegex.test(id)) {
-        const found = trajectoriesList.find(t => t.id === id);
+    // 1. 最高优先级：从当前活动窗口的 URL 中提取当前会话 UUID（/c/<uuid>）
+    // 在 Antigravity 中，活动聊天窗口的 URL 包含唯一会话 ID，极其可靠且不受焦点或标签切换变动干扰
+    try {
+      const urlText = (window.location.pathname || '') + ' ' + (window.location.href || '');
+      const urlMatch = urlText.match(/\/c\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+      if (urlMatch) {
+        const convId = urlMatch[1];
+        const found = trajectoriesList.find(t => t.id === convId);
         if (found) return found.id;
       }
-      if (el.src) {
-        const m = el.src.match(/conversationId=([0-9a-f-]+)/i);
-        if (m) {
-          const found = trajectoriesList.find(t => t.id === m[1]);
-          if (found) return found.id;
+    } catch (_) {}
+
+    // 2. 次高优先级：从主聊天工作区 DOM 检测活动会话容器
+    const activeChat = document.querySelector('.overflow-y-auto[data-cascade-id], [data-cascade-id].h-full, [data-cascade-id].bg-sidebar-secondary');
+    if (activeChat) {
+      const cid = activeChat.getAttribute('data-cascade-id');
+      if (cid && trajectoriesList.some(t => t.id === cid)) return cid;
+    }
+
+    // 3. 匹配 document.title（仅当标题包含会话名称且标题非默认窗口名时）
+    const docTitle = document.title || '';
+    if (docTitle && !docTitle.startsWith('Antigravity') && !docTitle.includes('Outside of Project')) {
+      for (const t of trajectoriesList) {
+        const title = t.annotations?.title || t.summary || '';
+        if (title && title.length > 1 && docTitle.includes(title)) {
+          return t.id;
         }
       }
     }
 
-    // 3. 检查顶部标签栏/活跃面板文本中是否包含会话标题
-    const activeHeaders = document.querySelectorAll('.active, [aria-selected="true"], h1, h2');
-    for (const el of activeHeaders) {
-      const text = el.textContent?.trim() || '';
-      if (text.length > 2) {
-        for (const t of trajectoriesList) {
-          const title = t.annotations?.title || t.summary || '';
-          if (title && text.includes(title)) {
-            return t.id;
-          }
-        }
-      }
+    // 4. 保底机制：如果之前已经锁定了某个会话且该会话仍在列表中，维持上一状态，绝不随意跳变到其他会话
+    if (activeTaskState?.id && trajectoriesList.some(t => t.id === activeTaskState.id)) {
+      return activeTaskState.id;
     }
 
-    // 4. 保底机制：取最后一次被用户浏览/聚焦（lastUserViewTime 最大）的会话
+    // 5. 最终保底：取最后浏览时间最新的会话
     const sortedByView = [...trajectoriesList].sort((a, b) => {
       const aView = new Date(a.annotations?.lastUserViewTime || 0).getTime();
       const bView = new Date(b.annotations?.lastUserViewTime || 0).getTime();
       return bView - aView;
     });
-    return sortedByView[0].id;
+    return sortedByView[0]?.id || trajectoriesList[0].id;
   }
 
   // 本轮 Token 统计缓存 (convId -> { lastModTime, data })，避免重复全量读取 Base64 造成性能与界面卡顿
@@ -808,7 +816,13 @@
 
     // 精准锁定当前窗口所属的会话
     const currentId = resolveCurrentWindowConversationId(list);
-    const active = list.find(t => t.id === currentId) || list[0];
+    let active = currentId ? list.find(t => t.id === currentId) : null;
+    if (!active && activeTaskState?.id) {
+      active = list.find(t => t.id === activeTaskState.id);
+    }
+    if (!active) {
+      active = list[0];
+    }
 
     const isRunning = active.status === 'CASCADE_RUN_STATUS_RUNNING';
     const userStartTime = active.lastUserInputTime ? new Date(active.lastUserInputTime).getTime() : 0;
@@ -928,6 +942,7 @@
   }
 
   function renderTaskPopoverContent(task) {
+    if (window.__AGY_ACTIVE_INSTANCE_ID__ !== WIDGET_INSTANCE_ID) return;
     const popover = getOrCreateTaskPopover();
     if (!task) {
       popover.innerHTML = `<div style="font-family:${FONT_SANS};color:#a1a1aa;text-align:center;padding:16px;">暂无当前会话任务</div>`;
@@ -1107,6 +1122,7 @@
   }
 
   function updateTaskTimerPill(task) {
+    if (window.__AGY_ACTIVE_INSTANCE_ID__ !== WIDGET_INSTANCE_ID) return;
     const topBar = document.querySelector('.bg-sidebar') || document.querySelector('.shrink-0');
     if (!topBar) return;
 
@@ -1242,6 +1258,7 @@
   // 3. 全局秒级本地平滑秒表与状态刷新
   // =========================================================================
   function tickTimer() {
+    if (window.__AGY_ACTIVE_INSTANCE_ID__ !== WIDGET_INSTANCE_ID) return;
     if (activeTaskState && activeTaskState.isRunning && activeTaskState.userStartTime) {
       const elapsed = Math.max(0, Math.floor((Date.now() - activeTaskState.userStartTime) / 1000));
       activeTaskState.elapsedSec = elapsed;
@@ -1256,8 +1273,9 @@
   }
 
   async function refreshTaskOnly(force = false) {
+    if (window.__AGY_ACTIVE_INSTANCE_ID__ !== WIDGET_INSTANCE_ID) return;
     const raw = await fetchTaskStatus();
-    if (!raw) return;
+    if (!raw || window.__AGY_ACTIVE_INSTANCE_ID__ !== WIDGET_INSTANCE_ID) return;
 
     // 1. 0ms 同步极速通道：提取当前会话并毫秒级更新顶栏胶囊与标题
     activeTaskState = resolveActiveTaskFast(raw);
@@ -1317,6 +1335,10 @@
       clearInterval(pollIntervalTimer);
       pollIntervalTimer = null;
     }
+    if (window.__AGY_TASK_POLL_TIMER__) {
+      clearInterval(window.__AGY_TASK_POLL_TIMER__);
+      window.__AGY_TASK_POLL_TIMER__ = null;
+    }
     // 快速任务轮询（1 秒一次极速同步当前窗口会话与任务变动）
     pollIntervalTimer = setInterval(() => {
       refreshTaskOnly(false);
@@ -1325,6 +1347,7 @@
         refreshQuotaOnly(false);
       }
     }, 1000);
+    window.__AGY_TASK_POLL_TIMER__ = pollIntervalTimer;
   }
 
   // 点击外部收起
@@ -1372,8 +1395,11 @@
     refreshAll();
     setupPollingTimer();
 
-    // 启动 1 秒本地平滑秒表
-    setInterval(tickTimer, 1000);
+    // 启动 1 秒本地平滑秒表，并绑定全局单例定时器
+    if (window.__AGY_TASK_TICK_TIMER__) {
+      clearInterval(window.__AGY_TASK_TICK_TIMER__);
+    }
+    window.__AGY_TASK_TICK_TIMER__ = setInterval(tickTimer, 1000);
 
     let retryCount = 0;
     const retryTimer = setInterval(() => {
@@ -1424,6 +1450,14 @@
     document.removeEventListener('pointerup', onPointerUp, true);
     document.removeEventListener('visibilitychange', onVisibilityChange);
     if (pollIntervalTimer) clearInterval(pollIntervalTimer);
+    if (window.__AGY_TASK_POLL_TIMER__) {
+      clearInterval(window.__AGY_TASK_POLL_TIMER__);
+      window.__AGY_TASK_POLL_TIMER__ = null;
+    }
+    if (window.__AGY_TASK_TICK_TIMER__) {
+      clearInterval(window.__AGY_TASK_TICK_TIMER__);
+      window.__AGY_TASK_TICK_TIMER__ = null;
+    }
     window.removeEventListener('focus', onWindowActivate);
     removeEl('agy-model-quota-topbar');
     removeEl('agy-quota-popover');
