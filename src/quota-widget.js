@@ -333,7 +333,7 @@
         <div style="margin-bottom:7px;">
           <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;opacity:0.85;">
             <span>${style === 'zh' ? '5小时限额' : '5-Hour Limit'}</span>
-            <span><strong style="color:${getStatusColor(g.p5h)};font-family:${FONT_NUM};font-variant-numeric:tabular-nums;font-weight:700;">${g.p5h}%</strong> · <span style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${g5hText}</span></span>
+            <span><strong style="color:${getStatusColor(g.p5h)};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;font-weight:700;">${g.p5h}<span style="font-size:10px;font-weight:normal;opacity:0.85;margin-left:0.5px;">%</span></strong> · <span style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${g5hText}</span></span>
           </div>
           <div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
             <div style="width:${g.p5h}%;height:100%;background:${getStatusColor(g.p5h)};border-radius:3px;transition:width 0.3s ease;"></div>
@@ -342,7 +342,7 @@
         <div>
           <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;opacity:0.85;">
             <span>${style === 'zh' ? '七天限额' : 'Weekly Limit'}</span>
-            <span><strong style="color:${getStatusColor(g.pW)};font-family:${FONT_NUM};font-variant-numeric:tabular-nums;font-weight:700;">${g.pW}%</strong> · <span style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${gWText}</span></span>
+            <span><strong style="color:${getStatusColor(g.pW)};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;font-weight:700;">${g.pW}<span style="font-size:10px;font-weight:normal;opacity:0.85;margin-left:0.5px;">%</span></strong> · <span style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${gWText}</span></span>
           </div>
           <div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
             <div style="width:${g.pW}%;height:100%;background:${getStatusColor(g.pW)};border-radius:3px;transition:width 0.3s ease;"></div>
@@ -363,7 +363,7 @@
           <div style="margin-bottom:7px;">
             <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;opacity:0.85;">
               <span>${style === 'zh' ? '5小时限额' : '5-Hour Limit'}</span>
-              <span><strong style="color:${getStatusColor(tp.p5h)};font-family:${FONT_NUM};font-variant-numeric:tabular-nums;font-weight:700;">${tp.p5h}%</strong> · <span style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${tp5hText}</span></span>
+              <span><strong style="color:${getStatusColor(tp.p5h)};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;font-weight:700;">${tp.p5h}<span style="font-size:10px;font-weight:normal;opacity:0.85;margin-left:0.5px;">%</span></strong> · <span style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${tp5hText}</span></span>
             </div>
             <div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
               <div style="width:${tp.p5h}%;height:100%;background:${getStatusColor(tp.p5h)};border-radius:3px;transition:width 0.3s ease;"></div>
@@ -372,7 +372,7 @@
           <div>
             <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;opacity:0.85;">
               <span>${style === 'zh' ? '七天限额' : 'Weekly Limit'}</span>
-              <span><strong style="color:${getStatusColor(tp.pW)};font-family:${FONT_NUM};font-variant-numeric:tabular-nums;font-weight:700;">${tp.pW}%</strong> · <span style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${tpWText}</span></span>
+              <span><strong style="color:${getStatusColor(tp.pW)};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;font-weight:700;">${tp.pW}<span style="font-size:10px;font-weight:normal;opacity:0.85;margin-left:0.5px;">%</span></strong> · <span style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${tpWText}</span></span>
             </div>
             <div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
               <div style="width:${tp.pW}%;height:100%;background:${getStatusColor(tp.pW)};border-radius:3px;transition:width 0.3s ease;"></div>
@@ -603,11 +603,11 @@
     pill.innerHTML = `
       <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dotColor};box-shadow: 0 0 6px ${dotColor}88;"></span>
       <span style="font-weight:500;opacity:0.9;font-family:${FONT_SANS};">Gemini:</span>
-      <span style="font-weight:600;color:${g.p5h < 20 ? '#ef4444' : 'var(--primary, #38bdf8)'};font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${g.p5h}%</span>
-      <span style="font-size:10px;opacity:0.5;margin-left:-4px;">(5h)</span>
-      <span style="opacity:0.3;">/</span>
-      <span style="font-weight:600;color:${g.pW < 20 ? '#ef4444' : 'var(--accent, #a78bfa)'};font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${g.pW}%</span>
-      <span style="font-size:10px;opacity:0.5;margin-left:-4px;">(${labelW})</span>
+      <span style="font-weight:600;color:${g.p5h < 20 ? '#ef4444' : 'var(--primary, #38bdf8)'};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;">${g.p5h}<span style="font-size:10px;font-weight:500;opacity:0.8;margin-left:0.5px;">%</span></span>
+      <span style="font-size:10px;opacity:0.55;margin-left:1px;">(5h)</span>
+      <span style="opacity:0.3;margin:0 2px;">/</span>
+      <span style="font-weight:600;color:${g.pW < 20 ? '#ef4444' : 'var(--accent, #a78bfa)'};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;">${g.pW}<span style="font-size:10px;font-weight:500;opacity:0.8;margin-left:0.5px;">%</span></span>
+      <span style="font-size:10px;opacity:0.55;margin-left:1px;">(${labelW})</span>
     `;
 
     const tip = config.triggerMode === 'click' ? '单击展开/收起详情面板' : '悬停预览，单击常开详情面板';
