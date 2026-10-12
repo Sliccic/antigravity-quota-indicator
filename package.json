@@ -1,7 +1,7 @@
 {
   "name": "antigravity-quota-indicator",
-  "version": "1.1.0",
-  "description": "⚡ Real-time AI model quota monitor, task duration timer, and token/cache metrics indicator widget for Google Antigravity Desktop Client (Google 反重力桌面客户端实时模型配额用量、任务执行计时器与 Tokens/缓存命中监控插件)",
+  "version": "1.0.1",
+  "description": "⚡ Real-time AI model quota monitor and status indicator widget for Google Antigravity Desktop Client (Google 反重力桌面客户端实时模型配额与用量监控插件)",
   "main": "src/quota-widget.js",
   "bin": {
     "antigravity-quota": "./bin/cli.js"
@@ -23,9 +23,6 @@
     "quota-indicator",
     "model-quota",
     "usage-monitor",
-    "task-timer",
-    "token-counter",
-    "cache-hit",
     "electron-plugin"
   ],
   "author": "Sliccic",
