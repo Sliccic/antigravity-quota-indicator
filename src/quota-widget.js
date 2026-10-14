@@ -1,6 +1,6 @@
 /**
  * Antigravity Real-Time Model Quota Indicator Widget
- * 实时模型余量显示组件 - 常驻顶部标题栏（支持设置选项、时间风格定制与触发模式切换）
+ * 实时模型余量显示组件 - 常驻顶部标题栏（支持设置选项、时间风格定制、触发模式切换与按需平滑毫秒倒计时）
  */
 (function initModelQuotaWidget() {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -21,6 +21,10 @@
     }
   }
   window.__AGY_MODEL_QUOTA_WIDGET_INITIALIZED__ = true;
+
+  // 统一现代无衬线原生字体栈与等宽字体栈
+  const FONT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif';
+  const FONT_NUM = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
 
   // 用户持久化配置
   const CONFIG_STORAGE_KEY = 'agy_quota_widget_config_v2';
@@ -47,7 +51,7 @@
     try {
       localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
     } catch (_) {}
-    // 重启定时器
+    // 重启后台定时轮询
     setupPollingTimer();
     // 重新渲染
     renderAll();
@@ -60,6 +64,9 @@
   let hidePopoverTimer = null;
   let isPopoverPinned = false;
   let currentCardView = 'quota'; // 'quota' | 'settings'
+
+  // 按需平滑倒计时器引用（仅在 Popover 展开可见时启动，关闭立即完全休眠）
+  let popoverTickTimer = null;
 
   async function fetchQuota(force = false) {
     if (isFetching && !force) return quotaData;
@@ -154,16 +161,12 @@
     const totalMin = Math.ceil(diffMs / 60000);
     const h = Math.floor(totalMin / 60);
     const m = totalMin % 60;
-    if (h === 0 && m === 0) {
-      return style === 'zh' ? '即将重置' : 'Resetting';
-    }
-    if (style === 'en') {
-      return h > 0 ? `${h}h ${m}m` : `${m}m`;
-    }
+    if (h === 0 && m === 0) return style === 'zh' ? '即将重置' : 'Resetting';
+    if (style === 'en') return h > 0 ? `${h}h ${m}m` : `${m}m`;
     return h > 0 ? `${h}小时${m}分钟` : `${m}分钟`;
   }
 
-  // 格式化 7 天限额重置倒计时：？天？小时 或 ？d ？h
+  // 格式化 7 天周限额重置倒计时：？天？小时 或 ？d ？h
   function formatWeeklyReset(isoStr, style) {
     if (!isoStr) return '-';
     const diffMs = new Date(isoStr).getTime() - Date.now();
@@ -171,13 +174,19 @@
     const totalHours = Math.floor(diffMs / 3600000);
     const d = Math.floor(totalHours / 24);
     const h = totalHours % 24;
-    if (d === 0 && h === 0) {
-      return style === 'zh' ? '< 1小时' : '< 1h';
-    }
-    if (style === 'en') {
-      return d > 0 ? `${d}d ${h}h` : `${h}h`;
-    }
+    if (d === 0 && h === 0) return style === 'zh' ? '< 1小时' : '< 1h';
+    if (style === 'en') return d > 0 ? `${d}d ${h}h` : `${h}h`;
     return d > 0 ? `${d}天${h}小时` : `${h}小时`;
+  }
+
+  // 格式化接口同步距离当前时间
+  function formatSyncAge(timeMs) {
+    if (!timeMs) return '刚刚';
+    const sec = Math.max(0, Math.floor((Date.now() - timeMs) / 1000));
+    if (sec < 5) return '刚刚已同步';
+    if (sec < 60) return `${sec}秒前已同步`;
+    const min = Math.floor(sec / 60);
+    return `${min}分钟前已同步`;
   }
 
   function getStatusColor(pct) {
@@ -211,7 +220,7 @@
         'transform: translateY(-6px)',
         'transition: opacity 0.18s ease, transform 0.18s ease',
         'pointer-events: auto',
-        'font-family: inherit'
+        'font-family: ' + FONT_SANS
       ].join(';');
 
       popover.addEventListener('mouseenter', () => {
@@ -232,11 +241,71 @@
     return popover;
   }
 
+  // 按需平滑倒计时控制函数
+  function stopPopoverTickTimer() {
+    if (popoverTickTimer) {
+      clearInterval(popoverTickTimer);
+      popoverTickTimer = null;
+    }
+  }
+
+  function startPopoverTickTimer() {
+    stopPopoverTickTimer();
+    popoverTickTimer = setInterval(() => {
+      const popover = document.getElementById('agy-quota-popover');
+      if (!popover || popover.style.display === 'none' || currentCardView !== 'quota') {
+        stopPopoverTickTimer();
+        return;
+      }
+      tickPopoverElements();
+    }, 1000);
+  }
+
+  function tickPopoverElements() {
+    const parsed = parseQuota(quotaData);
+    if (!parsed) return;
+    const style = config.timeStyle;
+
+    const elG5h = document.getElementById('agy-gemini-5h-text');
+    if (elG5h && parsed.gemini?.reset5h) {
+      elG5h.textContent = format5hReset(parsed.gemini.reset5h, style);
+    }
+
+    const elGW = document.getElementById('agy-gemini-w-text');
+    if (elGW && parsed.gemini?.resetW) {
+      elGW.textContent = formatWeeklyReset(parsed.gemini.resetW, style);
+    }
+
+    if (parsed.thirdParty) {
+      const elTp5h = document.getElementById('agy-tp-5h-text');
+      if (elTp5h && parsed.thirdParty.reset5h) {
+        elTp5h.textContent = format5hReset(parsed.thirdParty.reset5h, style);
+      }
+
+      const elTpW = document.getElementById('agy-tp-w-text');
+      if (elTpW && parsed.thirdParty.resetW) {
+        elTpW.textContent = formatWeeklyReset(parsed.thirdParty.resetW, style);
+      }
+    }
+
+    const elSyncAge = document.getElementById('agy-sync-age-text');
+    if (elSyncAge) {
+      elSyncAge.textContent = formatSyncAge(lastFetchTime);
+    }
+  }
+
   function openPopover(targetElement, pin = false) {
     if (hidePopoverTimer) clearTimeout(hidePopoverTimer);
     if (pin) isPopoverPinned = true;
 
     const popover = getOrCreatePopover();
+
+    // 打开瞬间立即根据当前最新毫秒数刷新视图，绝不展示过时缓存
+    if (currentCardView === 'quota') {
+      const parsed = parseQuota(quotaData);
+      if (parsed) renderQuotaView(popover, parsed);
+    }
+
     const rect = targetElement.getBoundingClientRect();
 
     popover.style.display = 'block';
@@ -248,11 +317,16 @@
     popover.style.transform = 'translateY(0)';
 
     targetElement.style.background = 'var(--secondary, rgba(255,255,255,0.12))';
+
+    // 唤醒按需秒级平滑倒计时
+    startPopoverTickTimer();
   }
 
   function closePopover() {
     isPopoverPinned = false;
     currentCardView = 'quota'; // 收起后重置为配额视图
+    stopPopoverTickTimer(); // 立即休眠，彻底释放 CPU 算力
+
     const popover = document.getElementById('agy-quota-popover');
     const pill = document.getElementById('agy-model-quota-topbar');
     if (pill) {
@@ -301,22 +375,22 @@
     const gWText = formatWeeklyReset(g.resetW, style);
 
     let html = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.08);">
-        <div style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.08);font-family:${FONT_SANS};">
+        <div style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:6px;color:#f8fafc;">
           <span>⚡ 模型用量与配额</span>
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
-          <button id="agy-quota-refresh-action" title="立即刷新配额" style="-webkit-app-region:no-drag;cursor:pointer;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:var(--foreground,#fff);font-size:11px;padding:3px 8px;border-radius:6px;display:flex;align-items:center;gap:3px;transition:background 0.2s;">
+          <button id="agy-quota-refresh-action" title="立即刷新配额" style="-webkit-app-region:no-drag;cursor:pointer;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:var(--foreground,#fff);font-size:11px;padding:3px 8px;border-radius:6px;display:flex;align-items:center;gap:3px;transition:background 0.2s;font-family:${FONT_SANS};">
             🔄 刷新
           </button>
-          <button id="agy-quota-settings-action" title="插件参数设置" style="-webkit-app-region:no-drag;cursor:pointer;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:var(--foreground,#fff);font-size:11px;padding:3px 8px;border-radius:6px;display:flex;align-items:center;gap:3px;transition:background 0.2s;">
+          <button id="agy-quota-settings-action" title="插件参数设置" style="-webkit-app-region:no-drag;cursor:pointer;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:var(--foreground,#fff);font-size:11px;padding:3px 8px;border-radius:6px;display:flex;align-items:center;gap:3px;transition:background 0.2s;font-family:${FONT_SANS};">
             ⚙️ 设置
           </button>
         </div>
       </div>
 
       <!-- Gemini Section -->
-      <div style="margin-bottom:12px;">
+      <div style="margin-bottom:12px;font-family:${FONT_SANS};">
         <div style="font-weight:500;color:var(--foreground,#fff);margin-bottom:6px;display:flex;justify-content:space-between;">
           <span>${g.name}</span>
           <span style="font-size:11px;opacity:0.6;">Pro & Flash 共享</span>
@@ -326,7 +400,11 @@
         <div style="margin-bottom:7px;">
           <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;opacity:0.85;">
             <span>${style === 'zh' ? '5小时限额' : '5-Hour Limit'}</span>
-            <span><strong style="color:${getStatusColor(g.p5h)}">${g.p5h}%</strong> · ${g5hText}</span>
+            <span>
+              <strong style="color:${getStatusColor(g.p5h)};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;font-weight:700;">
+                ${g.p5h}<span style="font-size:10px;font-weight:500;opacity:0.8;margin-left:0.5px;">%</span>
+              </strong> · <span id="agy-gemini-5h-text" style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${g5hText}</span>
+            </span>
           </div>
           <div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
             <div style="width:${g.p5h}%;height:100%;background:${getStatusColor(g.p5h)};border-radius:3px;transition:width 0.3s ease;"></div>
@@ -337,7 +415,11 @@
         <div>
           <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;opacity:0.85;">
             <span>${style === 'zh' ? '七天限额' : 'Weekly Limit'}</span>
-            <span><strong style="color:${getStatusColor(g.pW)}">${g.pW}%</strong> · ${gWText}</span>
+            <span>
+              <strong style="color:${getStatusColor(g.pW)};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;font-weight:700;">
+                ${g.pW}<span style="font-size:10px;font-weight:500;opacity:0.8;margin-left:0.5px;">%</span>
+              </strong> · <span id="agy-gemini-w-text" style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${gWText}</span>
+            </span>
           </div>
           <div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
             <div style="width:${g.pW}%;height:100%;background:${getStatusColor(g.pW)};border-radius:3px;transition:width 0.3s ease;"></div>
@@ -352,7 +434,7 @@
 
       html += `
         <!-- Claude & GPT Section -->
-        <div style="padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);margin-bottom:8px;">
+        <div style="padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);margin-bottom:8px;font-family:${FONT_SANS};">
           <div style="font-weight:500;color:var(--foreground,#fff);margin-bottom:6px;display:flex;justify-content:space-between;">
             <span>${tp.name}</span>
             <span style="font-size:11px;opacity:0.6;">第三方模型</span>
@@ -361,7 +443,11 @@
           <div style="margin-bottom:7px;">
             <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;opacity:0.85;">
               <span>${style === 'zh' ? '5小时限额' : '5-Hour Limit'}</span>
-              <span><strong style="color:${getStatusColor(tp.p5h)}">${tp.p5h}%</strong> · ${tp5hText}</span>
+              <span>
+                <strong style="color:${getStatusColor(tp.p5h)};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;font-weight:700;">
+                  ${tp.p5h}<span style="font-size:10px;font-weight:500;opacity:0.8;margin-left:0.5px;">%</span>
+                </strong> · <span id="agy-tp-5h-text" style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${tp5hText}</span>
+              </span>
             </div>
             <div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
               <div style="width:${tp.p5h}%;height:100%;background:${getStatusColor(tp.p5h)};border-radius:3px;transition:width 0.3s ease;"></div>
@@ -371,7 +457,11 @@
           <div>
             <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px;opacity:0.85;">
               <span>${style === 'zh' ? '七天限额' : 'Weekly Limit'}</span>
-              <span><strong style="color:${getStatusColor(tp.pW)}">${tp.pW}%</strong> · ${tpWText}</span>
+              <span>
+                <strong style="color:${getStatusColor(tp.pW)};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;font-weight:700;">
+                  ${tp.pW}<span style="font-size:10px;font-weight:500;opacity:0.8;margin-left:0.5px;">%</span>
+                </strong> · <span id="agy-tp-w-text" style="font-family:${FONT_NUM};font-variant-numeric:tabular-nums;">${tpWText}</span>
+              </span>
             </div>
             <div style="height:5px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">
               <div style="width:${tp.pW}%;height:100%;background:${getStatusColor(tp.pW)};border-radius:3px;transition:width 0.3s ease;"></div>
@@ -385,20 +475,24 @@
     const triggerLabel = config.triggerMode === 'click' ? '单击切换展开' : '悬停快速预览 (单击常开)';
 
     html += `
-      <div style="margin-top:10px;padding-top:6px;font-size:10px;opacity:0.5;display:flex;justify-content:space-between;">
+      <div style="margin-top:10px;padding-top:6px;font-size:10px;opacity:0.65;display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,0.06);font-family:${FONT_SANS};">
         <span>${triggerLabel}</span>
-        <span>${intervalLabel}</span>
+        <span style="display:inline-flex;align-items:center;gap:4px;">
+          <span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:#10b981;box-shadow:0 0 4px #10b98188;"></span>
+          <span id="agy-sync-age-text">${formatSyncAge(lastFetchTime)}</span>
+          <span style="opacity:0.4;">·</span>
+          <span>${intervalLabel}</span>
+        </span>
       </div>
     `;
 
     popover.innerHTML = html;
 
-    // 绑定刷新与设置按钮
     const refBtn = popover.querySelector('#agy-quota-refresh-action');
     if (refBtn) {
       refBtn.onclick = async (e) => {
         e.stopPropagation();
-        refBtn.textContent = '⏳ 同步中...';
+        refBtn.textContent = '⏳';
         await refreshAll(true);
       };
     }
@@ -408,13 +502,13 @@
       setBtn.onclick = (e) => {
         e.stopPropagation();
         currentCardView = 'settings';
-        isPopoverPinned = true;
+        stopPopoverTickTimer();
         renderSettingsView(popover);
       };
     }
   }
 
-  // 设置菜单视图
+  // 设置参数视图
   function renderSettingsView(popover) {
     const isClick = config.triggerMode === 'click';
     const isHover = config.triggerMode === 'hover';
@@ -425,35 +519,35 @@
     const normalBtnStyle = 'background:rgba(255,255,255,0.06);color:var(--foreground,#e5e7eb);border:1px solid rgba(255,255,255,0.1);font-weight:normal;';
 
     const html = `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.08);">
-        <button id="agy-settings-back" style="-webkit-app-region:no-drag;cursor:pointer;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:var(--foreground,#fff);font-size:11px;padding:3px 8px;border-radius:6px;display:flex;align-items:center;gap:4px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.08);font-family:${FONT_SANS};">
+        <button id="agy-settings-back" style="-webkit-app-region:no-drag;cursor:pointer;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);color:var(--foreground,#fff);font-size:11px;padding:3px 8px;border-radius:6px;display:flex;align-items:center;gap:4px;font-family:${FONT_SANS};">
           ← 返回
         </button>
         <span style="font-weight:600;font-size:13px;">⚙️ 插件参数设置</span>
         <span style="width:36px;"></span>
       </div>
 
-      <div style="display:flex;flex-direction:column;gap:12px;font-size:12px;">
-        <!-- 1. 展开触发方式 -->
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:12px;font-family:${FONT_SANS};">
+        <!-- 1. 触发模式 -->
         <div>
           <div style="font-weight:500;margin-bottom:6px;opacity:0.9;display:flex;justify-content:space-between;">
-            <span>展开触发方式</span>
+            <span>面板展开触发方式</span>
             <span style="font-size:10px;opacity:0.5;">${isClick ? '当前: 单击' : '当前: 悬停'}</span>
           </div>
           <div style="display:flex;gap:6px;">
-            <button id="opt-trigger-click" class="agy-cfg-btn" style="flex:1;padding:6px 8px;border-radius:6px;font-size:11px;cursor:pointer;-webkit-app-region:no-drag;transition:all 0.15s;${isClick ? activeBtnStyle : normalBtnStyle}">
+            <button id="opt-trigger-click" style="flex:1;padding:6px 8px;border-radius:6px;font-size:11px;cursor:pointer;-webkit-app-region:no-drag;transition:all 0.15s;font-family:${FONT_SANS};${isClick ? activeBtnStyle : normalBtnStyle}">
               👆 单击展开
             </button>
-            <button id="opt-trigger-hover" class="agy-cfg-btn" style="flex:1;padding:6px 8px;border-radius:6px;font-size:11px;cursor:pointer;-webkit-app-region:no-drag;transition:all 0.15s;${isHover ? activeBtnStyle : normalBtnStyle}">
+            <button id="opt-trigger-hover" style="flex:1;padding:6px 8px;border-radius:6px;font-size:11px;cursor:pointer;-webkit-app-region:no-drag;transition:all 0.15s;font-family:${FONT_SANS};${isHover ? activeBtnStyle : normalBtnStyle}">
               🖱️ 悬停展开
             </button>
           </div>
         </div>
 
-        <!-- 2. 自动刷新周期 -->
+        <!-- 2. 刷新频率 -->
         <div>
-          <div style="font-weight:500;margin-bottom:6px;opacity:0.9;">自动刷新时间周期</div>
-          <select id="opt-refresh-select" style="width:100%;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.08);color:var(--foreground,#e5e7eb);border:1px solid rgba(255,255,255,0.15);font-size:11px;cursor:pointer;-webkit-app-region:no-drag;outline:none;">
+          <div style="font-weight:500;margin-bottom:6px;opacity:0.9;">自动刷新时间间隔</div>
+          <select id="opt-refresh-select" style="width:100%;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,0.08);color:var(--foreground,#e5e7eb);border:1px solid rgba(255,255,255,0.15);font-size:11px;cursor:pointer;-webkit-app-region:no-drag;outline:none;font-family:${FONT_SANS};">
             <option value="30" ${config.refreshInterval === 30 ? 'selected' : ''}>30 秒</option>
             <option value="60" ${config.refreshInterval === 60 ? 'selected' : ''}>60 秒 (默认推荐)</option>
             <option value="120" ${config.refreshInterval === 120 ? 'selected' : ''}>2 分钟</option>
@@ -462,25 +556,25 @@
           </select>
         </div>
 
-        <!-- 3. 限额显示风格 -->
+        <!-- 3. 时间风格 -->
         <div>
           <div style="font-weight:500;margin-bottom:6px;opacity:0.9;display:flex;justify-content:space-between;">
-            <span>限额倒计时显示风格</span>
+            <span>限额显示风格</span>
             <span style="font-size:10px;opacity:0.5;">${isZh ? '中文风格' : '英文风格'}</span>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;">
-            <button id="opt-style-zh" class="agy-cfg-btn" style="text-align:left;padding:7px 10px;border-radius:6px;font-size:11px;cursor:pointer;-webkit-app-region:no-drag;transition:all 0.15s;${isZh ? activeBtnStyle : normalBtnStyle}">
-              中文格式: <strong>4小时23分钟</strong> · <strong>5天18小时</strong>
+            <button id="opt-style-zh" style="text-align:left;padding:7px 10px;border-radius:6px;font-size:11px;cursor:pointer;-webkit-app-region:no-drag;transition:all 0.15s;font-family:${FONT_SANS};${isZh ? activeBtnStyle : normalBtnStyle}">
+              中文格式: <strong>4小时28分钟</strong> · <strong>5天22小时</strong>
             </button>
-            <button id="opt-style-en" class="agy-cfg-btn" style="text-align:left;padding:7px 10px;border-radius:6px;font-size:11px;cursor:pointer;-webkit-app-region:no-drag;transition:all 0.15s;${isEn ? activeBtnStyle : normalBtnStyle}">
-              英文格式: <strong>4h 23m</strong> · <strong>5d 18h</strong>
+            <button id="opt-style-en" style="text-align:left;padding:7px 10px;border-radius:6px;font-size:11px;cursor:pointer;-webkit-app-region:no-drag;transition:all 0.15s;font-family:${FONT_SANS};${isEn ? activeBtnStyle : normalBtnStyle}">
+              英文格式: <strong>4h 28m</strong> · <strong>5d 22h</strong>
             </button>
           </div>
         </div>
       </div>
 
       <div style="margin-top:14px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);display:flex;justify-content:flex-end;">
-        <button id="agy-settings-done" style="-webkit-app-region:no-drag;cursor:pointer;background:var(--primary, #3b82f6);color:#fff;font-size:11px;padding:5px 14px;border-radius:6px;border:none;font-weight:500;">
+        <button id="agy-settings-done" style="-webkit-app-region:no-drag;cursor:pointer;background:var(--primary, #3b82f6);color:#fff;font-size:11px;padding:5px 14px;border-radius:6px;border:none;font-weight:500;font-family:${FONT_SANS};">
           保存并返回
         </button>
       </div>
@@ -488,14 +582,15 @@
 
     popover.innerHTML = html;
 
-    // 绑定返回
     const backBtn = popover.querySelector('#agy-settings-back');
     const doneBtn = popover.querySelector('#agy-settings-done');
     const goBack = () => {
       currentCardView = 'quota';
       const parsed = parseQuota(quotaData);
       renderQuotaView(popover, parsed);
+      startPopoverTickTimer();
     };
+
     if (backBtn) backBtn.onclick = goBack;
     if (doneBtn) doneBtn.onclick = goBack;
 
@@ -623,14 +718,15 @@
     const dotColor = getStatusColor(minPct);
     const labelW = config.timeStyle === 'zh' ? '周' : 'wk';
 
+    pill.style.fontFamily = FONT_SANS;
     pill.innerHTML = `
       <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dotColor};box-shadow: 0 0 6px ${dotColor}88;"></span>
-      <span style="font-weight:500;opacity:0.9;">Gemini:</span>
-      <span style="font-weight:600;color:${g.p5h < 20 ? '#ef4444' : 'var(--primary, #38bdf8)'}">${g.p5h}%</span>
-      <span style="font-size:10px;opacity:0.5;margin-left:-4px;">(5h)</span>
-      <span style="opacity:0.3;">/</span>
-      <span style="font-weight:600;color:${g.pW < 20 ? '#ef4444' : 'var(--accent, #a78bfa)'}">${g.pW}%</span>
-      <span style="font-size:10px;opacity:0.5;margin-left:-4px;">(${labelW})</span>
+      <span style="font-weight:500;opacity:0.9;font-family:${FONT_SANS};">Gemini:</span>
+      <span style="font-weight:600;color:${g.p5h < 20 ? '#ef4444' : 'var(--primary, #38bdf8)'};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;">${g.p5h}<span style="font-size:10px;font-weight:500;opacity:0.8;margin-left:0.5px;">%</span></span>
+      <span style="font-size:10px;opacity:0.55;margin-left:1px;">(5h)</span>
+      <span style="opacity:0.3;margin:0 2px;">/</span>
+      <span style="font-weight:600;color:${g.pW < 20 ? '#ef4444' : 'var(--accent, #a78bfa)'};font-family:${FONT_SANS};font-variant-numeric:tabular-nums;">${g.pW}<span style="font-size:10px;font-weight:500;opacity:0.8;margin-left:0.5px;">%</span></span>
+      <span style="font-size:10px;opacity:0.55;margin-left:1px;">(${labelW})</span>
     `;
 
     const tip = config.triggerMode === 'click' ? '单击展开/收起详情面板' : '悬停预览，单击常开详情面板';
@@ -638,9 +734,13 @@
   }
 
   function renderAll() {
-    const parsed = parseQuota(quotaData);
-    updateTopPill(parsed);
-    renderPopoverContent(parsed);
+    if (!quotaData) {
+      refreshAll(false);
+    } else {
+      const parsed = parseQuota(quotaData);
+      updateTopPill(parsed);
+      renderPopoverContent(parsed);
+    }
   }
 
   async function refreshAll(force = false) {
@@ -657,7 +757,12 @@
     }
     const sec = config.refreshInterval;
     if (sec > 0) {
-      pollIntervalTimer = setInterval(() => refreshAll(false), sec * 1000);
+      pollIntervalTimer = setInterval(() => {
+        const now = Date.now();
+        if (!quotaData || now - lastFetchTime >= (sec - 1) * 1000) {
+          refreshAll(false);
+        }
+      }, sec * 1000);
     }
   }
 
@@ -724,6 +829,7 @@
   window.addEventListener('focus', onFocus);
 
   window.__AGY_QUOTA_CLEANUP__ = () => {
+    stopPopoverTickTimer();
     observer.disconnect();
     document.removeEventListener('click', onDocumentClick, true);
     if (pollIntervalTimer) clearInterval(pollIntervalTimer);
