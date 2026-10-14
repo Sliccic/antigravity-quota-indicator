@@ -705,7 +705,17 @@
         pill.style.transform = 'scale(1)';
       });
 
-      topBar.appendChild(pill);
+      const taskPill = document.getElementById('agy-task-timer-topbar');
+      if (taskPill && taskPill.parentNode === topBar) {
+        topBar.insertBefore(pill, taskPill);
+      } else {
+        topBar.appendChild(pill);
+      }
+    } else {
+      const taskPill = document.getElementById('agy-task-timer-topbar');
+      if (taskPill && taskPill.parentNode === topBar && pill.nextElementSibling !== taskPill) {
+        topBar.insertBefore(pill, taskPill);
+      }
     }
 
     if (!parsed) {
